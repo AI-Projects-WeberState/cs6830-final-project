@@ -1,0 +1,215 @@
+GTFS documentation: https://gtfs.org/documentation/overview/
+GTFS Schedule zip downloaded from this link: https://gtfsfeed.rideuta.com/
+GTFS-RT will download a file(named Vehicle) : https://apps.rideuta.com/tms/gtfs/Vehicle
+
+Inside DuckDb
+- cd to folder
+- duckdb uta.db
+
+Create tables:
+	- CREATE OR REPLACE TABLE agency AS SELECT * FROM read_csv_auto('agency.txt');
+	- CREATE OR REPLACE TABLE stops AS SELECT * FROM read_csv_auto('stops.txt');
+	- CREATE OR REPLACE TABLE routes AS SELECT * FROM read_csv_auto('routes.txt');
+	- CREATE OR REPLACE TABLE trips AS SELECT * FROM read_csv_auto('trips.txt');
+	- CREATE OR REPLACE TABLE stop_times AS SELECT * FROM read_csv_auto('stop_times.txt');
+	- CREATE OR REPLACE TABLE calendar AS SELECT * FROM read_csv_auto('calendar.txt');
+	- CREATE OR REPLACE TABLE calendar_dates AS SELECT * FROM read_csv_auto('calendar_dates.txt');
+	- CREATE OR REPLACE TABLE shapes AS SELECT * FROM read_csv_auto('shapes.txt');
+	- CREATE OR REPLACE TABLE feed_info AS SELECT * FROM read_csv_auto('feed_info.txt');
+SHOW TABLES;
+
+Checking Data types & schemas (for batch transformation)
+Run these one by one and look at the column_name + column_type:
+	DESCRIBE agency; <- all columns are VARCHAR, agency_id PK
+	DESCRIBE stops; <- stop_id PK
+	DESCRIBE routes; <- route_id PK, agency_id FK to agency.agency_id
+	DESCRIBE trips; <- trip_id PK, route_id & service_id FK to routes & calendar
+	DESCRIBE stop_times; <- Time fields are strings: in Batch transformation we can either:
+		- cast to TIME, or
+		- Keep as VARCHAR but enforce a proper HH:MM:SS pattern.
+		trip_id & stop_sequence are 
+	DESCRIBE calendar; <- service_id PK
+		Note: start_date / end_date are numeric YYYYMMDD
+		Maybe cast TO_DATE(CAST(start_date AS VARCHAR), '%Y%m%d') to get proper DATE types.
+	DESCRIBE calendar_dates; <- service_id FK, 
+		Convert date to DATE;
+	DESCRIBE shapes;
+
+Now lets check Key Fields (PKs) & Cardinality
+Here we will test which columns behave like primary keys and how tables relate.
+
+routes.route_id
+	SELECT 
+	  COUNT(*) AS total_rows,
+	  COUNT(DISTINCT route_id) AS distinct_route_ids
+	FROM routes;	
+	┌────────────┬────────────────────┐
+	│ total_rows │ distinct_route_ids │
+	│   int64    │       int64        │
+	├────────────┼────────────────────┤
+	│     91     │         91         │
+	└────────────┴────────────────────┘
+These two numbers are equal -> route_id is a good PK.
+
+stops.stop_id
+	SELECT 
+	  COUNT(*) AS total_rows,
+	  COUNT(DISTINCT stop_id) AS distinct_stop_ids
+	FROM stops;	
+	┌────────────┬───────────────────┐
+	│ total_rows │ distinct_stop_ids │
+	│   int64    │       int64       │
+	├────────────┼───────────────────┤
+	│    5489    │       5489        │
+	└────────────┴───────────────────┘
+These two numbers are equal -> stop_id is PK.
+
+stop_times (trip_id, stop_sequence) composite PK
+	SELECT 
+	  COUNT(*) AS total_rows,
+	  COUNT(DISTINCT concat(trip_id, '-', stop_sequence)) AS distinct_trip_stop_seq
+	FROM stop_times;
+	┌────────────┬────────────────────────┐
+	│ total_rows │ distinct_trip_stop_seq │
+	│   int64    │         int64          │
+	├────────────┼────────────────────────┤
+	│   470580   │         470580         │
+	└────────────┴────────────────────────┘
+
+Check candidate primary keys
+-- routes: should be unique per route
+SELECT 
+  COUNT(*) AS total_routes,
+  COUNT(DISTINCT route_id) AS distinct_route_ids
+FROM routes;
+
+-- stops: should be unique per stop
+SELECT 
+  COUNT(*) AS total_stops,
+  COUNT(DISTINCT stop_id) AS distinct_stop_ids
+FROM stops;
+
+-- trips: should be unique per trip
+SELECT 
+  COUNT(*) AS total_trips,
+  COUNT(DISTINCT trip_id) AS distinct_trip_ids
+FROM trips;
+
+-- calendar: one row per service_id
+SELECT 
+  COUNT(*) AS total_calendar_rows,
+  COUNT(DISTINCT service_id) AS distinct_service_ids
+FROM calendar;
+
+-- stop_times: (trip_id, stop_sequence) should be unique
+SELECT 
+  COUNT(*) AS total_stop_times,
+  COUNT(DISTINCT concat(trip_id, '-', stop_sequence)) AS distinct_trip_stop_seq
+FROM stop_times;
+
+Interpretation:
+- If total_* == distinct_* for route_id, stop_id, trip_id, service_id, then each of those is a primary key.
+- If total_stop_times == distinct_trip_stop_seq, then (trip_id, stop_sequence) is a composite primary key for stop_times.
+
+Cardinality (min / avg / max) and data quality
+1. Trips per route
+	SELECT 
+	  MIN(trip_count) AS min_trips_per_route,
+	  AVG(trip_count) AS avg_trips_per_route,
+	  MAX(trip_count) AS max_trips_per_route
+	FROM (
+	  SELECT route_id, COUNT(*) AS trip_count
+	  FROM trips
+	  GROUP BY route_id
+	) t;
+Interpretation:
+		- Every route has at least 6 trips.
+		- On average, a route has about 123 trips defined in the schedule.
+		- Some routes have up to 482 trips.
+
+2. Trips per service_id
+	SELECT 
+	  MIN(trip_count) AS min_trips_per_service,
+	  AVG(trip_count) AS avg_trips_per_service,
+	  MAX(trip_count) AS max_trips_per_service
+	FROM (
+	  SELECT service_id, COUNT(*) AS trip_count
+	  FROM trips
+	  GROUP BY service_id
+	) t;
+Interpretation:
+		- Each service pattern (e.g., “Weekday”, “Saturday”) is used by at least 1 trip.
+		- On average, a service_id is referenced by ~1,000+ trips.
+		- Some service_ids are used by over 5,700 trips.
+
+3. Stops per trip
+	SELECT 
+	  MIN(stop_count) AS min_stops_per_trip,
+	  AVG(stop_count) AS avg_stops_per_trip,
+	  MAX(stop_count) AS max_stops_per_trip
+	FROM (
+	  SELECT trip_id, COUNT(*) AS stop_count
+	  FROM stop_times
+	  GROUP BY trip_id
+	) s;
+Interpretation:
+		- Every trip serves at least 2 stops.
+		- On average, a trip serves about 42 stops.
+		- Some trips serve up to 189 stops.
+		
+Data quality: coordinates
+	SELECT
+	  COUNT(*) AS total_stops,
+	  SUM(CASE WHEN stop_lat < -90 OR stop_lat > 90 OR stop_lat IS NULL THEN 1 ELSE 0 END) AS bad_lat,
+	  SUM(CASE WHEN stop_lon < -180 OR stop_lon > 180 OR stop_lon IS NULL THEN 1 ELSE 0 END) AS bad_lon
+	FROM stops;
+	Interpretation:
+		- There are 5,489 stops.
+		- All stops have latitude and longitude in valid ranges.
+		
+
+	SELECT
+	  COUNT(*) AS total_stop_times,
+
+	  -- numeric columns: only check IS NULL
+	  SUM(CASE WHEN trip_id IS NULL THEN 1 ELSE 0 END) AS missing_trip_id,
+	  SUM(CASE WHEN stop_id IS NULL THEN 1 ELSE 0 END) AS missing_stop_id,
+
+	  -- time columns are VARCHAR: check NULL or ''
+	  SUM(CASE WHEN arrival_time IS NULL OR arrival_time = '' THEN 1 ELSE 0 END) AS missing_arrival_time,
+	  SUM(CASE WHEN departure_time IS NULL OR departure_time = '' THEN 1 ELSE 0 END) AS missing_departure_time
+
+	FROM stop_times;
+Interpretation:
+	- There are 470,580 scheduled stop-time records.
+	- Every row has:
+		- a valid trip_id
+		- a valid stop_id
+		- a non-null, non-empty arrival_time
+		- a non-null, non-empty departure_time
+
+In the UTA GTFS schedule feed, we loaded the core text files (agency, stops, routes, trips, stop_times, calendar, calendar_dates, shapes, 
+and feed_info) into DuckDB and inspected their structure to understand both the logical schema and the data quality. The resulting schema 
+reflects the standard GTFS model: agency describes the transit operator, while routes defines each transit line, with route_id acting as a 
+primary key and a foreign key reference back to agency via agency_id. The trips table represents individual vehicle journeys on those routes 
+and uses trip_id as a primary key; each trip is associated with exactly one route through route_id, confirming a clear one-to-many relationship 
+from routes to trips (each route has between 6 and 482 trips, with an average of about 123). Service patterns are defined by service_id in the 
+calendar and calendar_dates tables, where calendar captures the regular weekly schedule (days of week and date ranges) and calendar_dates 
+stores exceptions such as holidays or special events. Our analysis showed that some service_ids used in trips do not appear in calendar, 
+which is consistent with GTFS semantics: a trip’s service can be defined exclusively in calendar_dates, so conceptually trips.service_id 
+points to the union of calendar and calendar_dates. The stop_times table contains the detailed schedule for each trip, including arrival_time, 
+departure_time, stop_id, and stop_sequence; we verified that the composite pair (trip_id, stop_sequence) is unique and thus forms a natural 
+composite primary key. Foreign-key checks confirmed that every trip_id in stop_times matches a row in trips and every stop_id in stop_times 
+matches a row in stops, which establishes a one-to-many relationship from trips to stop_times and from stops to stop_times, and therefore a 
+many-to-many relationship between trips and stops mediated by stop_times. Quantitatively, each trip serves between 2 and 189 stops, with an 
+average of about 42 stops per trip, which aligns with realistic transit operations. The stops table itself defines 5,489 distinct stops with 
+stop_id as the primary key and includes latitude and longitude for mapping; all coordinates fall within valid geographic ranges 
+(no latitudes outside −90 to 90 or longitudes outside −180 to 180). The shapes table describes the geometry of routes as ordered sequences 
+of latitude/longitude points keyed by (shape_id, shape_pt_sequence), and trips.shape_id links each trip to a polyline that can be drawn on a map. 
+From a typing and data quality perspective, DuckDB inferred most identifiers (route_id, stop_id, trip_id, shape_id) as BIGINT because UTA’s IDs 
+are numeric in this feed, while descriptive fields (names, URLs, colors) are VARCHAR, coordinates are DOUBLE, and schedule fields such as 
+arrival_time and departure_time are VARCHAR, with dates (start_date, end_date, date) stored as BIGINT in YYYYMMDD format. Our completeness 
+checks showed that the stop_times table contains 470,580 rows and that all rows have non-null trip_id, stop_id, arrival_time, and 
+departure_time, indicating excellent completeness for the core schedule data that will be needed to compute ETAs and on-time performance 
+in later phases. Together, these findings give us a clear relational model: agencies own routes, routes have many trips, trips are scheduled 
+over service patterns and mapped to shapes, and the actual stop-level schedules are represented by stop_times connecting trips and stops.
