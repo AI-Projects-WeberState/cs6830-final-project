@@ -9,7 +9,7 @@ glue = boto3.client('glue')
 
 def lambda_handler(event, context):
     
-    BUCKET = "final-project"
+    BUCKET = "cs6830-final-project"
     CRAWLER_NAME = "gtfs-schedule-crawler-new"
     
     # Today's date for folder structure
@@ -42,9 +42,17 @@ def lambda_handler(event, context):
         
         uploaded_files.append(f"s3://{BUCKET}/{s3_key}")
     
-    glue.start_crawler(Name=CRAWLER_NAME)
+    # Start crawler with error handling
+    try:
+        glue.start_crawler(Name=CRAWLER_NAME)
+        crawler_status = "started"
+    except glue.exceptions.CrawlerRunningException:
+        crawler_status = "already running"
+    except Exception as e:
+        crawler_status = f"error: {str(e)}"
     
     return {
         "status": "success",
-        "processed_files": uploaded_files
+        "processed_files": uploaded_files,
+        "crawler_status": crawler_status
     }
