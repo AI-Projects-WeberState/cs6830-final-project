@@ -66,3 +66,84 @@ https://developers.google.com/transit/gtfs-realtime
 4. Stream the Data: Your code should put the decoded data into a nice form (for example, JSON) and send it to a streaming service. We recommend using Kinesis Data Streams.
 
 5. Testing: Ensure that you can receive and decode the data from Amazon Kinesis. Check the correctness and freshness of the data that you receive. Embedding a timestamp from the GTFS source will allow the data consumer to check how old the data is.
+
+## Week 3
+
+In Week 3, the assignment focuses on **combining real-time GTFS-RT data with the batch GTFS schedule data** and building a fully functional **real-time dashboard**. Week 3 also includes the original Week 4 objectives due to schedule adjustments.
+
+The primary goal is to produce a **user-facing dashboard or mapping interface** that displays up-to-date UTA vehicle information in a meaningful and readable format.
+
+---
+
+### 1. Objectives
+
+1. **Combine Schedule + Real-Time Data**  
+   Integrate the batch schedule data from Week 1 with the rapidly changing GTFS-RT vehicle data from Week 2.  
+   The backend must compute:
+   - Estimated arrival times (ETA)
+   - Delay in seconds/minutes
+   - On-time performance (early / on-time / late)
+   - Next scheduled stop
+   - Route and headsign information
+
+2. **Backend API Layer**  
+   Create a backend service (Flask or any framework of choice) that exposes the processed results through a simple REST endpoint: GET /api/vehicles
+   This API returns a list of active vehicles and their relevant computed fields such as:
+        - `vehicle_id`
+        - `route_id` or `route_short_name`
+        - `headsign`
+        - `lat`, `lon`
+        - `bearing` (direction of travel)
+        - `next_stop_name`
+        - `estimated_arrival`
+        - `delay_seconds`
+        - `on_time_status`
+        - `last_update`
+        - `generated_at` (timestamp for data freshness)
+
+3. **Build the Dashboard**  
+Construct a UI that fetches the data from the backend and displays it through:
+- A **table view** of all active vehicles  
+- A **map view** showing vehicle locations in real time  
+The dashboard may be hosted locally, as allowed by the project instructions.
+
+---
+
+### 2. Dashboard Implementation
+
+The Week 3 dashboard is implemented in: /code/week-3-dashboard
+#### Features Implemented
+
+- **Table View**
+  - ETA displayed in natural language (`in 3 min`, `2 min ago`, `now`)
+  - Delay calculation
+  - On-time performance with color-coded labels
+  - Route + headsign
+  - Next stop
+  - Last update time
+  - Route filtering dropdown
+  - Manual refresh button
+  - Auto-refresh every 60 seconds
+
+- **Map View (react-leaflet)**
+  - Directional arrow markers indicating vehicle bearing  
+    (generated with CSS, no external images required)
+  - Color-coded by on-time status  
+    - LATE → red  
+    - EARLY → blue  
+    - ON_TIME → green  
+    - UNKNOWN → gray  
+  - Smooth animation when vehicle positions update
+  - Popups showing detailed vehicle info
+  - Fully reactive to backend data
+
+- **Backend Integration**
+  - The frontend fetches data from `http://localhost:5000/api/vehicles`
+  - A mock backend is included for development and testing
+
+---
+
+### 3. Backend Implementation 
+
+The backend for Week 3 is located at: /code/week-3-backend
+
