@@ -1,16 +1,66 @@
-# React + Vite
+# Week 3 – Real-Time Dashboard (Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This folder contains the React + Vite dashboard for the CS6830 Final Project (Week 3).  
+The dashboard displays real-time UTA vehicle information including:
 
-Currently, two official plugins are available:
+- Route & direction (headsign)  
+- Next stop  
+- Estimated arrival time (ETA)  
+- Delay / on-time performance  
+- Last update timestamp  
+- **Interactive map view with directional, animated vehicle markers**  
+- **Sortable table view**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+The dashboard is designed to work with any backend that exposes the `/api/vehicles` endpoint following the agreed JSON contract.
 
-## React Compiler
+---
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+### **1. Two Main Views**
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+#### **Table View**
+- Sorted by delay (late vehicles appear first)
+- Clean rider-friendly format
+- ETA displayed as:
+  - `11:05 AM (in 3 min)`
+  - `11:12 AM (2 min ago)`
+- Color-coded status indicators:
+  - **ON_TIME** – green  
+  - **LATE** – red  
+  - **EARLY** – blue  
+
+#### **Map View**
+- Built using **react-leaflet**
+- Vehicles displayed as **directional arrow markers**
+- Arrows rotate based on heading/bearing
+- Marker color reflects on-time status
+- Smooth animation when vehicle positions update
+- Popup with route info, next stop, ETA, last update
+
+---
+
+## Folder Structure
+week-3-dashboard/
+├── public/
+├── src/
+│ ├── App.jsx
+│ ├── App.css
+│ ├── VehicleMap.jsx
+│ ├── config.js
+│ ├── main.jsx
+│ ├── index.css
+│ └── assets/
+├── package.json
+├── vite.config.js
+└── README.md
+
+## Running the Dashboard (Local Development)
+From inside week-3-dashboard: npm install
+Start the development server: npm run dev
+
+Backend Endpoint
+The dashboard expects data from:
+http://localhost:5000/api/vehicles
+
+Configured in: src/config.js
