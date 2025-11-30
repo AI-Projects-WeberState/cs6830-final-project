@@ -1,66 +1,133 @@
+import os
+import json
+import time
+import threading
+import boto3
 from datetime import datetime, timezone
 from flask import Flask, jsonify
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+# Import our new logic module
+from gtfs import GTFSStaticRepository, TripEstimator
+
+load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # allow requests from your Vite frontend during dev
+CORS(app)
 
+# --- Configuration ---
+KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME", "gtfs-realtime-stream")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+GTFS_STATIC_PATH = os.getenv("GTFS_STATIC_PATH", "./data")
+GTFS_URL = "https://gtfsfeed.rideuta.com/GTFS.zip"
+
+# --- Setup ---
+# 1. Load Static Data
+repo = GTFSStaticRepository(GTFS_STATIC_PATH, GTFS_URL)
+repo.initialize()
+
+# 2. Initialize Logic
+estimator = TripEstimator(repo)
+
+# 3. Global State (In-Memory Cache)
+LATEST_STATE = {
+    "generated_at": None,
+    "last_polled": None,
+    "vehicles": []
+}
+
+def handle_new_data(feed_data):
+    """Callback for when we get a new batch of records from Kinesis."""
+    global LATEST_STATE
+    
+    # 1. Parse raw feed into basic vehicle objects
+    raw_vehicles = []
+    entities = feed_data.get('entity', [])
+    
+    for entity in entities:
+        v = entity.get('vehicle', {})
+        if not v: continue
+        
+        trip = v.get('trip', {})
+        position = v.get('position', {})
+        
+        # Convert timestamp to ISO format for frontend
+        ts = v.get('timestamp')
+        last_update = None
+        if ts:
+            try:
+                last_update = datetime.fromtimestamp(int(ts), timezone.utc).isoformat()
+            except (ValueError, TypeError):
+                last_update = None
+
+        raw_vehicles.append({
+            "vehicle_id": v.get('vehicle', {}).get('id'),
+            "trip_id": trip.get('tripId'),
+            "lat": position.get('latitude'),
+            "lon": position.get('longitude'),
+            "speed_mps": position.get('speed', 0),
+            "bearing": position.get('bearing', 0),
+            "timestamp": ts,
+            "last_update": last_update
+        })
+
+    # 2. Enrich with Static Data & Estimates
+    processed_vehicles = estimator.enrich_vehicle_data(raw_vehicles)
+    
+    # 3. Update State
+    current_time = datetime.now(timezone.utc).isoformat()
+    LATEST_STATE["generated_at"] = current_time
+    LATEST_STATE["vehicles"] = processed_vehicles
+    print(f"Updated {len(processed_vehicles)} vehicles at {current_time}.")
+
+def poll_kinesis():
+    """Background thread that sits in a loop and polls Kinesis for new data."""
+    global LATEST_STATE
+    kinesis = boto3.client('kinesis', region_name=AWS_REGION)
+    print(f"Starting Kinesis polling on {KINESIS_STREAM_NAME}...")
+    shard_iterator = None
+
+    while True:
+        try:
+            # Update last_polled timestamp to show we are alive
+            LATEST_STATE["last_polled"] = datetime.now(timezone.utc).isoformat()
+
+            if not shard_iterator:
+                response = kinesis.get_shard_iterator(
+                    StreamName=KINESIS_STREAM_NAME,
+                    ShardId='shardId-000000000000',
+                    ShardIteratorType='LATEST'
+                )
+                shard_iterator = response['ShardIterator']
+                print("Got new Shard Iterator.")
+
+            record_response = kinesis.get_records(ShardIterator=shard_iterator, Limit=10)
+            shard_iterator = record_response.get('NextShardIterator')
+            records = record_response.get('Records', [])
+
+            if records:
+                last_record = records[-1]
+                data_str = last_record['Data'].decode('utf-8')
+                data_json = json.loads(data_str)
+                handle_new_data(data_json)
+            
+            time.sleep(1)
+
+        except Exception as e:
+            print(f"Error polling Kinesis: {e}")
+            shard_iterator = None
+            time.sleep(5)
+
+# 4. Start Kinesis Polling
+threading.Thread(target=poll_kinesis, daemon=True).start()
+
+# --- Routes ---
 
 @app.get("/api/vehicles")
 def get_vehicles():
-    """
-    Temporary mock implementation so the frontend has real-looking data.
-    We should later replace the body of this function to:
-      - Read latest JSON from Kinesis (gtfs-realtime-stream)
-      - Join with schedule data from Week 1
-      - Compute on-time performance, ETA, etc.
-    """
-    now = datetime.now(timezone.utc).isoformat()
-
-    # This shape matches what your React dashboard expects.
-    mock_response = {
-        "generated_at": now,
-        "vehicles": [
-            {
-                "vehicle_id": "V123",
-                "route_id": "F850",
-                "route_short_name": "F850",
-                "headsign": "Salt Lake Central",
-                "trip_id": "TRIP_001",
-                "lat": 40.760412,
-                "lon": -111.888153,
-                "speed_mps": 6.3,
-                "last_update": now,
-                "next_stop_id": "STOP_1001",
-                "next_stop_name": "Downtown Ogden Station",
-                "scheduled_arrival": "2025-11-29T18:05:00Z",
-                "estimated_arrival": "2025-11-29T18:06:30Z",
-                "delay_seconds": 90,
-                "on_time_status": "LATE",  # or ON_TIME / EARLY
-            },
-            {
-                "vehicle_id": "V456",
-                "route_id": "612",
-                "route_short_name": "612",
-                "headsign": "Ogden",
-                "trip_id": "TRIP_002",
-                "lat": 41.223,
-                "lon": -111.973,
-                "speed_mps": 4.1,
-                "last_update": now,
-                "next_stop_id": "STOP_2002",
-                "next_stop_name": "Main St & 25th",
-                "scheduled_arrival": "2025-11-29T18:10:00Z",
-                "estimated_arrival": "2025-11-29T18:09:30Z",
-                "delay_seconds": -30,
-                "on_time_status": "EARLY",
-            },
-        ],
-    }
-
-    return jsonify(mock_response)
-
+    return jsonify(LATEST_STATE)
 
 if __name__ == "__main__":
-    # For local dev only. In prod you'd use gunicorn or similar.
     app.run(host="0.0.0.0", port=5000, debug=True)
+

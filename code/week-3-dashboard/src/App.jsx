@@ -37,7 +37,7 @@ function App() {
   useEffect(() => {
     const intervalId = setInterval(() => {
       fetchVehicles();
-    }, 60_000);
+    }, 5000);
     return () => clearInterval(intervalId);
   }, []);
 
