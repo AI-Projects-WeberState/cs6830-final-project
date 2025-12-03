@@ -62,7 +62,7 @@ function App() {
     return db - da;
   });
 
-  // Summary stats
+  // Summary stats (used only for display)
   const total = filteredVehicles.length;
   const onTimeCount = filteredVehicles.filter(
     (v) => v.on_time_status === 'ON_TIME'
@@ -73,6 +73,10 @@ function App() {
   const earlyCount = filteredVehicles.filter(
     (v) => v.on_time_status === 'EARLY'
   ).length;
+
+  const onTimePct = total ? Math.round((onTimeCount / total) * 100) : 0;
+  const latePct = total ? Math.round((lateCount / total) * 100) : 0;
+  const earlyPct = total ? Math.round((earlyCount / total) * 100) : 0;
 
   const formatEta = (estimatedArrival) => {
     if (!estimatedArrival) return '-';
@@ -107,17 +111,33 @@ function App() {
     return `${mins} min`;
   };
 
+  const routeLabel =
+    selectedRoute === 'ALL' ? 'all routes' : `route ${selectedRoute}`;
+
   return (
     <div className="app">
       <div className="app-inner">
+        {/* HEADER */}
         <header className="app-header">
-          <h1>UTA Real-Time Dashboard</h1>
-          <p className="subtitle">
-            Check current vehicle status, next stop arrival, and on-time
-            performance.
-          </p>
+          <div className="app-header-left">
+            <div className="app-header-badge">UTA Transit Operations</div>
+            <h1>UTA Real-Time Dashboard</h1>
+            <p className="subtitle">
+              Check current vehicle status, next stop arrival, and on-time
+              performance.
+            </p>
+          </div>
+
+          <div className="app-header-right">
+            <div className="header-chip header-chip-live">
+              <span className="live-dot" />
+              Live feed
+            </div>
+            <div className="header-chip">Bus &amp; rail network</div>
+          </div>
         </header>
 
+        {/* CONTROLS */}
         <section className="controls">
           <div className="controls-left">
             <label className="control-label">
@@ -153,30 +173,76 @@ function App() {
           </div>
         </section>
 
-        {/* Summary cards */}
+        {/* SUMMARY & PERFORMANCE */}
         {!loading && !error && (
-          <section className="summary">
-            <div className="summary-card">
-              <div className="summary-label">Total vehicles</div>
-              <div className="summary-value">{total}</div>
-            </div>
-            <div className="summary-card summary-on-time">
-              <div className="summary-label">On time</div>
-              <div className="summary-value">{onTimeCount}</div>
-            </div>
-            <div className="summary-card summary-late">
-              <div className="summary-label">Late</div>
-              <div className="summary-value">{lateCount}</div>
-            </div>
-            <div className="summary-card summary-early">
-              <div className="summary-label">Early</div>
-              <div className="summary-value">{earlyCount}</div>
-            </div>
-          </section>
+          <>
+            <section className="summary">
+              <div className="summary-card">
+                <div className="summary-label">Total vehicles</div>
+                <div className="summary-value">{total}</div>
+              </div>
+              <div className="summary-card summary-on-time">
+                <div className="summary-label">On time</div>
+                <div className="summary-value">{onTimeCount}</div>
+              </div>
+              <div className="summary-card summary-late">
+                <div className="summary-label">Late</div>
+                <div className="summary-value">{lateCount}</div>
+              </div>
+              <div className="summary-card summary-early">
+                <div className="summary-label">Early</div>
+                <div className="summary-value">{earlyCount}</div>
+              </div>
+            </section>
+
+            <section className="performance-overview">
+              <div className="performance-text">
+                <h2>Live on-time snapshot</h2>
+                <p>
+                  {total === 0
+                    ? `No active vehicles reported on ${routeLabel}.`
+                    : `${onTimePct}% of active vehicles on ${routeLabel} are on time, ${latePct}% late, and ${earlyPct}% early.`}
+                </p>
+              </div>
+
+              <div className="performance-bar" aria-hidden="true">
+                <div
+                  className="performance-segment performance-on-time"
+                  style={{ width: `${onTimePct || 0}%` }}
+                />
+                <div
+                  className="performance-segment performance-late"
+                  style={{ width: `${latePct || 0}%` }}
+                />
+                <div
+                  className="performance-segment performance-early"
+                  style={{ width: `${earlyPct || 0}%` }}
+                />
+              </div>
+
+              <div className="performance-legend">
+                <div className="performance-pill performance-pill-on-time">
+                  <span className="pill-dot pill-dot-on-time" />
+                  On time
+                  <span className="pill-value">{onTimePct}%</span>
+                </div>
+                <div className="performance-pill performance-pill-late">
+                  <span className="pill-dot pill-dot-late" />
+                  Late
+                  <span className="pill-value">{latePct}%</span>
+                </div>
+                <div className="performance-pill performance-pill-early">
+                  <span className="pill-dot pill-dot-early" />
+                  Early
+                  <span className="pill-value">{earlyPct}%</span>
+                </div>
+              </div>
+            </section>
+          </>
         )}
 
-        {/* View toggle */}
-        {!loading && !error && total > 0 && (
+        {/* VIEW TOGGLE */}
+        {!loading && !error && filteredVehicles.length > 0 && (
           <div className="view-toggle">
             <button
               className={
@@ -215,71 +281,92 @@ function App() {
           </div>
         )}
 
+        {/* TABLE + MAP */}
         {!loading && !error && filteredVehicles.length > 0 && (
           <>
-            {viewMode === 'table' && (
-              <section className="table-section">
-                <table className="vehicles-table">
-                  <thead>
-                    <tr>
-                      <th>Route</th>
-                      <th>Direction</th>
-                      <th>Next stop</th>
-                      <th>ETA</th>
-                      <th>Delay</th>
-                      <th>Status</th>
-                      <th>Last update</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredVehicles.map((v) => {
-                      const status = v.on_time_status || 'UNKNOWN';
-                      const statusClass =
-                        status === 'ON_TIME'
-                          ? 'status-on-time'
-                          : status === 'LATE'
-                          ? 'status-late'
-                          : status === 'EARLY'
-                          ? 'status-early'
-                          : 'status-unknown';
+            {/* helper text above panel (keep or tweak) */}
+            <div className="table-meta">
+              <div className="table-meta-left">
+                <span className="table-meta-label">
+                  Showing {filteredVehicles.length} vehicle
+                  {filteredVehicles.length !== 1 ? 's' : ''} on{' '}
+                  {selectedRoute === 'ALL' ? 'all routes' : `route ${selectedRoute}`}.
+                </span>
+              </div>
+              <div className="table-meta-right">
+                <span className="table-meta-note">
+                  Sorted by delay (most late at the top).
+                </span>
+              </div>
+            </div>
 
-                      return (
-                        <tr
-                          key={
-                            v.vehicle_id || `${v.route_id}-${v.trip_id || ''}`
-                          }
-                        >
-                          <td>{v.route_short_name || v.route_id || '-'}</td>
-                          <td>{v.headsign || v.trip_headsign || '-'}</td>
-                          <td>{v.next_stop_name || '-'}</td>
-                          <td>{formatEta(v.estimated_arrival)}</td>
-                          <td>{formatDelay(v.delay_seconds, status)}</td>
-                          <td>
-                            <span className={`status-pill ${statusClass}`}>
-                              {status}
-                            </span>
-                          </td>
-                          <td>
-                            {v.last_update
-                              ? new Date(v.last_update).toLocaleTimeString(
-                                  undefined,
-                                  {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  }
-                                )
-                              : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            {/* 🔵 ONE shared panel area for both views */}
+            {viewMode === 'table' && (
+              <section className="data-panel data-panel-table">
+                <div className="table-scroll">
+                  <table className="vehicles-table">
+                    <thead>
+                      <tr>
+                        <th>Route</th>
+                        <th>Direction</th>
+                        <th>Next stop</th>
+                        <th>ETA</th>
+                        <th>Delay</th>
+                        <th>Status</th>
+                        <th>Last update</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredVehicles.map((v) => {
+                        const status = v.on_time_status || 'UNKNOWN';
+                        const statusClass =
+                          status === 'ON_TIME'
+                            ? 'status-on-time'
+                            : status === 'LATE'
+                            ? 'status-late'
+                            : status === 'EARLY'
+                            ? 'status-early'
+                            : 'status-unknown';
+
+                        return (
+                          <tr
+                            key={v.vehicle_id || `${v.route_id}-${v.trip_id || ''}`}
+                          >
+                            <td>{v.route_short_name || v.route_id || '-'}</td>
+                            <td>{v.headsign || v.trip_headsign || '-'}</td>
+                            <td>{v.next_stop_name || '-'}</td>
+                            <td>{formatEta(v.estimated_arrival)}</td>
+                            <td>{formatDelay(v.delay_seconds, status)}</td>
+                            <td>
+                              <span className={`status-pill ${statusClass}`}>
+                                {status}
+                              </span>
+                            </td>
+                            <td>
+                              {v.last_update
+                                ? new Date(v.last_update).toLocaleTimeString(
+                                    undefined,
+                                    {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    }
+                                  )
+                                : '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             )}
 
             {viewMode === 'map' && (
-              <VehicleMap vehicles={filteredVehicles} />
+              <section className="data-panel data-panel-map">
+                {/* VehicleMap just fills the panel */}
+                <VehicleMap vehicles={filteredVehicles} />
+              </section>
             )}
           </>
         )}

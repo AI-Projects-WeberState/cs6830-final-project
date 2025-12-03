@@ -69,12 +69,12 @@ export default function VehicleMap({ vehicles }) {
   );
 
   return (
-    <section className="map-section">
+    <section className="content-panel map-section">
       <MapContainer
         center={center}
         zoom={11}
         scrollWheelZoom={true}
-        style={{ height: '420px', width: '100%' }}
+        className="vehicle-map-container"
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
